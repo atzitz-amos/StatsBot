@@ -54,18 +54,23 @@ class Indexer:
             if task == END:
                 print(f"[Task {asyncio.current_task().get_name()}]", "Stopping")
                 return
-            async for message in self.fetcher.fetch(task - self.delta, task):
+            async for message in self.fetcher.fetch(
+                    max(task - self.delta,
+                        pytz.utc.localize(self.savestate.last_indexed)) if self.savestate.loaded else task - self.delta,
+                    task):
                 if message.author.id != ClientHolder.client.user.id:
                     self.messages[str(message.id)] = (
                         message.created_at.timestamp(), message.author.id, message.content, message.id)
 
                     if str(message.created_at.date()) not in self.by_datetime:
                         self.by_datetime[str(message.created_at.date())] = []
-                    self.by_datetime[str(message.created_at.date())].append(message.id)
+                    self.by_datetime[str(message.created_at.date())].append((
+                        message.created_at.timestamp(), message.author.id, message.content, message.id))
 
                     if str(message.author.id) not in self.by_author:
                         self.by_author[str(message.author.id)] = []
-                    self.by_author[str(message.author.id)].append(message.id)
+                    self.by_author[str(message.author.id)].append((
+                        message.created_at.timestamp(), message.author.id, message.content, message.id))
 
                     print(f"[{asyncio.current_task().get_name()}] Retrieved", message.content, "by", message.author,
                           f"[{len(self.messages)}th message]")
@@ -82,9 +87,11 @@ class Indexer:
 
         if date not in self.by_datetime:
             self.by_datetime[date] = []
-        self.by_datetime[date].append(message.id)
+        self.by_datetime[date].append((
+            message.created_at.timestamp(), message.author.id, message.content, message.id))
         if author not in self.by_author:
             self.by_author[author] = []
-        self.by_author[author].append(message.id)
+        self.by_author[author].append((
+            message.created_at.timestamp(), message.author.id, message.content, message.id))
 
         self.savestate.dumpAdd(messages=self.messages, by_datetime=self.by_datetime, by_author=self.by_author)

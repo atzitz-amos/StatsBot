@@ -3,6 +3,7 @@ import time
 
 import discord.ui
 import matplotlib.pyplot as plt
+from discord.ext import pages as paginator
 from discord.file import File
 
 from bot.holders import FilenameCounterHolder
@@ -93,10 +94,9 @@ async def sendPieGraph(channel, embed, filename, values, total, labels):
     return await _sendGraph(channel, embed, filename)
 
 
-class OverflowView(discord.ui.View):
+class OverflowView:
 
-    def __init__(self, channel, filename, x, y, drange, creator, embed: discord.Embed, kwargs):
-        super().__init__()
+    def __init__(self, channel, filename, x, y, drange, creator, embed: discord.Embed, **kwargs):
         self.channel = channel
         self.filename = filename
 
@@ -108,54 +108,46 @@ class OverflowView(discord.ui.View):
 
         self.embed = embed
 
-        self.current_range = [0, drange]
-
-        self.page = 0
         self.kwargs = kwargs
 
+        self.pages = self.create_pages()
+        self.paginator = paginator.Paginator(self.pages)
+
     async def send(self):
-        filename = normalizeFilename(self.filename, "bar")
+        """filename = normalizeFilename(self.filename, "bar")
         _, exec_time = self.creator(filename, self.x[:self.drange], self.y[:self.drange], **self.kwargs)
         file = File(f"./graphs/{filename}.png")
         self.embed.set_image(url=f"attachment://{filename}.png")
+        """
+        msg = await self.channel.send(content="Stats")
+        await self.paginator.edit(msg)
 
-        await self.channel.send(embed=self.embed, file=file, delete_after=60 * 15)
+        # os.remove(f"./graphs/{filename}.png")
 
-        os.remove(f"./graphs/{filename}.png")
+    def create_pages(self):
+        i = 0
+        files = []
+        filenames = []
+        pages = []
+        while i < len(self.x):
+            prev = i
+            i += self.drange + 1
+            filename = normalizeFilename(self.filename, "paginator")
+            print(self.x[prev: i + 1])
 
-    @discord.ui.button(label="Previous", row=1)
-    async def on_previous(self, button, interaction):
-        start, end = self.current_range
-        self.current_range = [start - self.drange, end - self.drange]
-        if self.current_range[0] <= 0:
-            self.current_range[0] = 0
-            self.current_range[1] = self.drange
-            return await interaction.response.edit_message(view=self)
-        self.page -= 1
-        await self.update(interaction)
-
-    @discord.ui.button(label="Next", disabled=False, row=0)
-    async def on_next(self, button, interaction):
-        start, end = self.current_range
-        self.current_range = [start + self.drange, end + self.drange]
-        if self.current_range[1] >= len(self.x):
-            self.current_range[0] = len(self.x) - self.drange
-            self.current_range[1] = len(self.x)
-            return await interaction.response.edit_message(view=self)
-        self.page += 1
-        await self.update(interaction)
-
-    async def update(self, interaction):
-        filename = normalizeFilename(self.filename, "bar")
-        start, end = self.current_range
-
-        _, exec_time = self.creator(filename, self.x[start: end + 1], self.y[start: end + 1], **self.kwargs)
-        file = File(f"./graphs/{filename}.png")
-        self.embed.set_image(url=f"attachment://{filename}.png")
-
-        os.remove(f"./graphs/{filename}.png")
-
-        await interaction.response.edit_message(embed=self.embed, file=file, delete_after=60 * 15, view=self)
+            _, exec_time = self.creator(filename, self.x[prev: i + 1], self.y[prev: i + 1], **self.kwargs)
+            file = File(f"./graphs/{filename}.png")
+            files.append(file)
+            filenames.append(f"./graphs/{filename}.png")
+            embed = self.embed.copy()
+            embed.set_image(url=f"attachment://{filename}.png")
+            pages.append(paginator.Page(embeds=[embed], files=[file]))
+        """for file in files:
+            file.close()
+        for fname in filenames:
+            os.remove(fname)"""
+        print([p.embeds for p in pages])
+        return pages
 
 
 D_RANGE = 4
@@ -164,5 +156,5 @@ D_RANGE = 4
 async def overflow(channel, embed, filename, x, y, creator=None, **kw):
     if len(x) < 4:
         return await sendBarGraph(channel, embed, filename, x, y, **kw)
-    view = OverflowView(channel, filename, x, y, D_RANGE, creator=creator, **kw)
+    view = OverflowView(channel, filename, x, y, D_RANGE, creator=creator, embed=embed, **kw)
     await view.send()

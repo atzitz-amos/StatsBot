@@ -28,6 +28,7 @@ async def on_ready():
             print("Found save file on", save.last_indexed)
         except Exception:
             save = saves.SaveState(channel)
+
         async for msg in channel.history(limit=1, oldest_first=True):
             index = Indexer(Fetcher(channel), save, msg.created_at)
             await index.index()
@@ -48,4 +49,4 @@ async def on_message(msg):
     await TriggerProcessor.invoke(msg.channel, msg.content)
 
 
-bot.run("MTEwMjMwMzU3NTc2MzMyOTA4Ng.G5w-v-.34CsyroNP03pPrqpCgxqPtzvL6XENrt3mzK5DU")
+bot.run("MTEwMjMwMzU3NTc2MzMyOTA4Ng.GlIb5w.RqCM3sl80f8V1gSnIrQgs7aRGWYDgWRVAWq3nI")

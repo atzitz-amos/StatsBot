@@ -1,6 +1,5 @@
 import datetime
 import enum
-import re
 import time
 
 import discord
@@ -30,14 +29,6 @@ class Data(enum.Enum):
     BY = 5
 
 
-class ParameterType(enum.Enum):
-    MEMBER = 0
-    DATETIME = 1
-    NUMBER = 2
-    BOOL = 3
-    ALL = 4
-
-
 class Filterer:
 
     def __init__(self):
@@ -65,7 +56,7 @@ class Filterer:
     def validate(self, message):
         flag0, flag1, flag2 = not self.from_, not self.to, not self.contains
         if not flag0:
-            dt = pytz.utc.localize(datetime.datetime.fromtimestamp(message[0]))
+            dt = pytz.utc.localize(datetime.datetime.fromtimestamp(int(message[0])))
             flag0 = self.from_ <= dt
         if not flag1:
             dt = pytz.utc.localize(datetime.datetime.fromtimestamp(message[0]))
@@ -73,6 +64,14 @@ class Filterer:
         if not flag2:
             flag2 = self.contains in message[2]
         return flag0 and flag1 and flag2
+
+
+class Mappings:
+
+    def __init__(self, mappings, key, value):
+        self.mappings = mappings
+        self.key = key
+        self.value = value
 
 
 def command(base, sub):
@@ -92,7 +91,7 @@ def _fetch_and_filter(index, key, value, filterer=None):
             msg_provider = lambda k: list(filter(lambda val: int(k) == val[1], index.messages.values()))
         case Data.DATETIME:
             key_set = set(index.by_datetime.keys())
-            msg_provider = lambda k: index.by_datetime
+            msg_provider = lambda k: index.by_datetime[k]
         case Data.CONTENT:
             key_set = set(map(lambda x: x[2], index.messages))
             msg_provider = lambda k: list(filter(lambda val: k in val[2], index.messages.values()))
@@ -112,7 +111,7 @@ def _fetch_and_filter(index, key, value, filterer=None):
     result = {}
     for key in key_set:
         result[key] = [value_provider(msg) for msg in msg_provider(key) if filterer.validate(msg)]
-    return result
+    return Mappings(result, key, value)
 
 
 def data(key, value):
@@ -146,12 +145,21 @@ def data(key, value):
     return decorator
 
 
+def sorter(func):
+    async def trigger(channel, mappings, **opts):
+        sorting = opts.get("sortedby", "greater")
+        mappings.mappings = dict(sorted(mappings.mappings.items(), key=lambda el: el[1], reverse=sorting == "lower"))
+        return await func(channel, mappings, **opts)
+
+    return trigger
+
+
 class TriggerProcessor:
     triggers = []
 
     @classmethod
-    def addTrigger(cls, base, sub, options=None, trigger=None):
-        cls.triggers.append((base, sub, options, trigger))
+    def addTrigger(cls, base, sub, trigger=None):
+        cls.triggers.append((base, sub, trigger))
 
     @classmethod
     async def invoke(cls, channel, string):
@@ -159,10 +167,10 @@ class TriggerProcessor:
         if not extracted:
             return -1
         b, s, opts = extracted
-        for base, sub, options, trigger in cls.triggers:
+        for base, sub, trigger in cls.triggers:
             if base == b and sub == s:
                 if callable(trigger):
-                    await trigger(channel, base, sub, **cls.validate_options(opts, options))
+                    await trigger(channel, base, sub, **opts)
                 break
         return -1
 
@@ -204,65 +212,24 @@ class TriggerProcessor:
             i += 2
         return base, sub, options
 
-    @classmethod
-    def validate_options(cls, given, required):
-        if not required:
-            return given
-
-        def _validate(value, expected):
-            match expected:
-                case ParameterType.MEMBER:
-                    if re.match("^<@[0-9]{18}>$", value):
-                        try:
-                            mid = int(value[2: -1])
-                            return mid
-                        except ValueError:
-                            pass
-                case ParameterType.BOOL:
-                    if value in ("true", "false"):
-                        return value == "true"
-                case ParameterType.NUMBER:
-                    try:
-                        return int(value)
-                    except ValueError:
-                        pass
-                case ParameterType.ALL:
-                    return value
-                case ParameterType.DATETIME:
-                    # TODO
-                    return value
-            raise ValueError("Wrong type")
-
-        required_formatted = {k.replace("_", ""): v for k, v in required.items()}
-
-        options = {}
-        not_fulfilled = [el for el, val in required_formatted.items() if val[1] and el not in given]
-        if not_fulfilled:
-            raise ValueError(
-                f"Parameter{'s' if len(not_fulfilled) > 1 else ''} {', '.join(not_fulfilled)} "
-                f"{'were' if len(not_fulfilled) > 1 else 'was'} not fulfilled.")
-        for k, v in given.items():
-            if k not in required_formatted:
-                continue
-            new_value = _validate(v, required_formatted[k][0])
-            if new_value:
-                options[k] = new_value
-        return options
-
 
 @command("stats", "messages")
 @data(Data.BY, Data.MESSAGES)
+@sorter
 async def message_stats(channel, mappings, **opts):
-    print(opts)
+    mappings = mappings.mappings
     start = time.perf_counter()
-    x, y = [], []
-    for k, v in mappings.items():
-        try:
-            x.append((await getMember(channel.guild.id, k)).name)
-        except discord.NotFound:
-            continue
-        y.append(len(v))
-
+    if opts.get("by") == "author":
+        print(opts)
+        x, y = [], []
+        for k, v in mappings.items():
+            try:
+                x.append((await getMember(channel.guild.id, k)).name)
+            except discord.NotFound:
+                continue
+            y.append(len(v))
+    elif opts.get("by") == "datetime":
+        x, y = list(mappings.keys()), [len(v) for v in mappings.values()]
     return await overflow(channel=channel, embed=await createEmbed("Stats - Messages per Members",
                                                                    elapsed=time.perf_counter() - start),
                           filename="stats_graph_messages_per_members",
